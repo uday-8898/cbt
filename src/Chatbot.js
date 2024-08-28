@@ -15,7 +15,7 @@ const Chatbot = () => {
   const [activeTab, setActiveTab] = useState('Home');
   const [messages, setMessages] = useState([]);
   const [userInput, setUserInput] = useState('');
-  const [, setSelectedFile] = useState(null);
+  const [selectedFile, setSelectedFile] = useState(null);
   const [visibleFAQIndex, setVisibleFAQIndex] = useState(null);
   const [isChatbotOpen, setIsChatbotOpen] = useState(true);
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -31,7 +31,7 @@ const Chatbot = () => {
   const [isLoading, setIsLoading] = useState(false); // New state for loading
 
   const chatEndRef = useRef(null);
-  // const ws = useRef(null);
+  const ws = useRef(null);
 
   // FAQs for Home and Help tabs
   const homeFAQs = [
@@ -59,16 +59,15 @@ const Chatbot = () => {
     if (isChatbotOpen) {
       if (messages.length === 0) {
         appendMessage('bot', t("Welcome to Meridian! How can I assist you today?"), true);
-      } 
-      else if (!preliminaryMessageSent && messages[messages.length - 1]?.sender === 'user') {
+      } else if (!preliminaryMessageSent && messages[messages.length - 1]?.sender === 'user') {
         appendMessage('bot', t("Before we go further, I need some information from you."), true);
         setPreliminaryMessageSent(true);
-      }
-       else if (preliminaryMessageSent && messages[messages.length - 1]?.sender === 'user') {
+      } else if (preliminaryMessageSent && messages[messages.length - 1]?.sender === 'user') {
         handlePreliminaryQuestions();
       }
     }
-  }, [isChatbotOpen, messages, preliminaryMessageSent, t]);
+  }, [isChatbotOpen, messages, preliminaryMessageSent, t, appendMessage, handlePreliminaryQuestions]);
+  
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
@@ -194,14 +193,14 @@ const Chatbot = () => {
     }
   };
 
-  const handleAPIResponse = (data) => {
-    console.log('API Response Data:', data); // Log API response data
-    if (data.message) {
-      appendMessage('bot', data.message, true);
-    } else {
-      appendMessage('bot', t("Received an unexpected response."), true);
-    }
-  };
+  // const handleAPIResponse = (data) => {
+  //   console.log('API Response Data:', data); // Log API response data
+  //   if (data.message) {
+  //     appendMessage('bot', data.message, true);
+  //   } else {
+  //     appendMessage('bot', t("Received an unexpected response."), true);
+  //   }
+  // };
 
   const handleUserResponse = (response) => {
     const updatedDetails = { ...userDetails };
@@ -241,7 +240,7 @@ const Chatbot = () => {
   return (
     <div className={`chatbot-popup ${isChatbotOpen ? 'open' : 'closed'}`}>
       <div className="chat-header">
-        <img src={clogo} alt="logo" />
+      <img src={clogo} alt="Company Logo" />
         <img src={bestwrk} className="new-image" alt="New Image" />
         <button id="close-btn" onClick={handleCloseChatbot}>&times;</button>
       </div>
