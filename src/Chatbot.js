@@ -15,7 +15,7 @@ const Chatbot = () => {
   const [activeTab, setActiveTab] = useState('Home');
   const [messages, setMessages] = useState([]);
   const [userInput, setUserInput] = useState('');
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [, setSelectedFile] = useState(null);
   const [visibleFAQIndex, setVisibleFAQIndex] = useState(null);
   const [isChatbotOpen, setIsChatbotOpen] = useState(true);
   const [currentQuestion, setCurrentQuestion] = useState(0);
@@ -31,7 +31,7 @@ const Chatbot = () => {
   const [isLoading, setIsLoading] = useState(false); // New state for loading
 
   const chatEndRef = useRef(null);
-  const ws = useRef(null);
+  // const ws = useRef(null);
 
   // FAQs for Home and Help tabs
   const homeFAQs = [
