@@ -1,17 +1,22 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import clogo from './Image/clogo.png';
 import bestwrk from './Image/bestwrk.png'
 import './App.css';
 import '@fortawesome/fontawesome-free/css/all.min.css';
 import UserDetailsForm from './UserDetailsForm';
-import { v4 as uuidv4 } from 'uuid';
  
 // Sample questions for preliminary user details
 const questions = [
   "Please provide your details",
 ];
- 
+
+// Attach the function to the window's load event
+window.onload = function() {
+  localStorage.removeItem('last_two_chat_history');
+  localStorage.removeItem('complete_chat_history');
+};
+  
 const Chatbot = () => {
   const { t, i18n } = useTranslation();
   const [activeTab, setActiveTab] = useState('Home');
@@ -21,21 +26,20 @@ const Chatbot = () => {
   const [visibleFAQIndex, setVisibleFAQIndex] = useState(null);
   const [isChatbotOpen, setIsChatbotOpen] = useState(true);
   const [currentQuestion, setCurrentQuestion] = useState(0);
+  const [savedHistory, setSavedHistory] = useState(JSON.parse(localStorage.getItem('complete_chat_history')) || []);
   const [userDetails, setUserDetails] = useState({
     name: '',
-    location: '',
     email: '',
     phone: '',
+    company: '',
   });
   const [activeService, setActiveService] = useState(false)
   const [preliminaryMessageSent, setPreliminaryMessageSent] = useState(false);
   const [isRealTimeChat, setIsRealTimeChat] = useState(false);
   const [isLoading, setIsLoading] = useState(false); // New state for loading
   const [showForm, setShowForm] = useState(false);
-  const [showYesNoButtons, setShowYesNoButtons] = useState(false);
  
   const chatEndRef = useRef(null);
-  const ws = useRef(null);
  
   // FAQs for Home and Help tabs
   const homeFAQs = [
@@ -53,6 +57,28 @@ const Chatbot = () => {
     { question: t("What is the average turnaround time for resolving support tickets?"), answer: t("The initial response time will 30 mins after raising support request.") },
   ];
  
+  const appendMessage = useCallback((sender, message, isStreaming = false) => {
+    // console.log('Appending message:', sender, message);
+    
+    if (isStreaming) {
+      streamMessage(sender, message);
+    } else {
+      setMessages(prevMessages => [...prevMessages, { sender, message }]);
+    }
+  }, [setMessages]);
+  
+
+  const handlePreliminaryQuestions = useCallback((isInitialCall = false) => {
+    const questionIndex = currentQuestion;
+    if (questionIndex < questions.length) {
+      setCurrentQuestion(questionIndex + 1);
+    } else if (!isRealTimeChat) {
+      appendMessage('bot', t("Thank you for sharing your details. Feel free to ask me anything!"), true);
+      setIsRealTimeChat(true);
+      setActiveService(true);
+    }
+  }, [currentQuestion, appendMessage, setIsRealTimeChat, setActiveService, isRealTimeChat, t]);  
+  
   useEffect(() => {
     // Update FAQ content when the language changes
     setVisibleFAQIndex(null);
@@ -60,130 +86,112 @@ const Chatbot = () => {
   }, [i18n.language]);
  
   useEffect(() => {
-    if (isChatbotOpen) {
-      if (messages.length === 0) {
-        appendMessage('bot', t("Welcome to Meridian Solutions! Before we continue, may I ask for some basic information?"), true);
-        setShowYesNoButtons(true);
-      } 
-      else if (!preliminaryMessageSent && messages[messages.length - 1]?.sender === 'user') {
-        const userMessage = messages[messages.length - 1].message.toLowerCase();
+    const checkUserResponse = async (message) => {
+      setIsLoading(true);
+      try {
+        const response = await fetch('http://127.0.0.1:8000/submit', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            user_input: message,
+          }),
+        });
   
-        if (
-          userMessage.toLowerCase() === 'yes' ||
-          userMessage.toLowerCase() === 'ok' ||
-          userMessage.toLowerCase() === 'sure' ||
-          userMessage.toLowerCase() === 'tak' ||           // Polish for "yes"
-          userMessage === '好的' ||           // Chinese (Simplified) for "ok"
-          userMessage === '是的' ||           // Chinese (Simplified) for "yes"
-          userMessage === 'हाँ' ||            // Hindi for "yes"
-          userMessage === 'ठीक है' ||         // Hindi for "ok"
-          userMessage === 'نعم' ||            // Arabic for "yes"
-          userMessage === 'حسناً'            // Arabic for "ok"
-      ) {
-          console.log("User agreed:", messages[messages.length - 1].message);
-          setPreliminaryMessageSent(true);
-          setShowForm(true);
-          setShowYesNoButtons(false); // Hide Yes/No buttons
-        } 
-        else if (
-          userMessage.toLowerCase() === 'no' || 
-          userMessage.toLowerCase() === 'nope' ||
-          userMessage.toLowerCase() === 'not at all' ||
-          userMessage.toLowerCase() === 'negative' ||
-          userMessage.toLowerCase() === 'never' ||
-          userMessage === 'لا' ||  // Arabic
-          userMessage === 'نعم' ||  // Hindi, informal
-          userMessage === 'नहीं' || // Hindi, formal
-          userMessage.toLowerCase() === 'na' ||   // Hindi, informal
-          userMessage.toLowerCase() === 'Nie' ||  // Polish
-          userMessage === '不' ||    // Chinese0
-          userMessage === '不是'    // Chinese, formal
-      ) {
-          console.log("User declined:", messages[messages.length - 1].message);
-          appendMessage('bot', t("Ok, no issue. Feel free to ask me anything else!"), true);
-          setPreliminaryMessageSent(true);
-          setIsRealTimeChat(true); // Activate real-time chat mode
-          console.log('Real-time chat mode activated.');
-          setActiveService(true);
-          setShowYesNoButtons(false); // Hide Yes/No buttons
-        }
-        else {
-          // If the user types anything else
-          console.log("User provided input:", messages[messages.length - 1].message);
-          setPreliminaryMessageSent(true);
-          setShowForm(true); // Open the form
-          setIsRealTimeChat(true); // Start real-time chat mode
-          console.log('Real-time chat mode activated.');
-          setActiveService(true);
-          setShowYesNoButtons(false); // Hide Yes/No buttons
-        }
-      } 
-      else if (preliminaryMessageSent && messages[messages.length - 1]?.sender === 'user') {
-        handlePreliminaryQuestions(true); // Process preliminary questions
+        const data = await response.json();
+        console.log("D", data)
+        console.log("INtention:", data.intent)
+        setIsLoading(false);
+        return data.intent; // Expecting 'true', 'false'
+      } catch (error) {
+        console.error('Error checking user response:', error);
+        return 'neutral'; // Default to neutral if there's an error
       }
-    }
-    else {
+    };
+  
+    if (isChatbotOpen) {
+      if (messages.length === 0 && savedHistory.length === 0) {
+        appendMessage('bot', t("Welcome to Meridian Solutions! Before we continue, may I ask for some basic information?"), true);
+      } else if (!preliminaryMessageSent && messages[messages.length - 1]?.sender === 'user') {
+        const userMessage = messages[messages.length - 1].message.toLowerCase();
+        checkUserResponse(userMessage)
+          .then(response => {
+            console.log("Response:", response);
+            if (response) {
+              console.log("User agreed:", messages[messages.length - 1].message);
+              setPreliminaryMessageSent(true);
+              setShowForm(true);
+            } else {
+              console.log("User declined:", messages[messages.length - 1].message);
+              appendMessage('bot', t("Ok, no issue. Feel free to ask me anything else!"), true);
+              setPreliminaryMessageSent(true);
+              setIsRealTimeChat(true); // Activate real-time chat mode
+              console.log('Real-time chat mode activated.');
+              setActiveService(true);
+            }
+          })
+          .catch(error => {
+            console.error("Error checking user response:", error);
+            // Handle error if needed
+          });
+      }
+    } else {
       // Logic for when the chatbot is not open
       console.log('Chatbot is closed');
-      resetChat(); // Reset the chat when chatbot is closed
+      setIsChatbotOpen(false); // Reset the chat when chatbot is closed
     }
-  }, [isChatbotOpen, messages, preliminaryMessageSent, t]);
+    
+  }, [isChatbotOpen, setIsChatbotOpen, messages, preliminaryMessageSent, t, appendMessage, handlePreliminaryQuestions]);
   
-  const handlePreliminaryQuestions = (isInitialCall = false) => {
-    const questionIndex = currentQuestion;
-  
-    if (questionIndex < questions.length) {
-      // Append the next question or set the form to true
-      setCurrentQuestion(questionIndex + 1);
-    } else if (!isRealTimeChat) {
-      appendMessage('bot', t("Thank you for sharing your details. Feel free to ask me anything!"), true);
-      setIsRealTimeChat(true); // Activate real-time chat mode
-      console.log('Real-time chat mode activated.');
-      setActiveService(true);
-    }
-  };
-  
-  const handleYesClick = () => {
-    setPreliminaryMessageSent(true);
-    setShowForm(true);
-    setShowYesNoButtons(false); // Hide Yes/No buttons
-    appendMessage('user', 'Yes'); // Simulate user response
-  };
-  const handleNoClick = () => {
-    setPreliminaryMessageSent(true);
-    setIsRealTimeChat(true); // Activate real-time chat mode
-    setActiveService(true);
-    setShowYesNoButtons(false); // Hide Yes/No buttons
-    appendMessage('user', 'No'); // Simulate user response
-    appendMessage('bot', t("Ok, no issue. Feel free to ask me anything else!"), true);
-  };
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
-  }, [messages]);
- 
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]); 
+
+  useEffect(() => {
+    if (isChatbotOpen) {
+      if (savedHistory.length > 0) {
+        // Display saved messages
+        const formattedMessages = savedHistory?.flatMap(chat => [
+          { sender: 'user', message: chat.user_query },
+          { sender: 'bot', message: chat.bot_response }
+        ]).filter(message => message.message !== null && message.message.trim() !== '');
+
+        // Check if the last message is from the bot and the welcome message was sent
+        const lastMessage = formattedMessages[formattedMessages.length - 1];
+        const hasBotResponse = lastMessage?.sender === 'bot';
+
+        // console.log("FM:", formattedMessages)
+        messages.push(formattedMessages)
+        // console.log("Mlen:", messages.length)
+        setMessages(formattedMessages);
+        
+        // Set flags based on chat history
+        if (hasBotResponse) {
+          setPreliminaryMessageSent(true);
+          setIsRealTimeChat(true);
+          setActiveService(true);
+        }
+        
+      } else {
+        // No saved history, send the welcome message
+        appendMessage('bot', t("Welcome to Meridian Solutions! Before we continue, may I ask for some basic information?"), true);
+      }
+    }
+  }, [isChatbotOpen, t, appendMessage]);
+  
+
   const resetChat = () => {
     setMessages([]); // Clear messages
     setPreliminaryMessageSent(false); // Reset preliminary message flag
     setIsRealTimeChat(false); // Deactivate real-time chat mode
     setCurrentQuestion(0); // Reset question index
-    setUserDetails({
+    setUserDetails({  
       name: '',
-      location: '',
       email: '',
       phone: '',
+      company: ''
     }); // Reset user details
-    // Optionally you can reset any other state as required
-  };
- 
- 
-  const appendMessage = (sender, message, isStreaming = false) => {
-    console.log('Appending message:', sender, message); // Debugging line
- 
-    if (isStreaming) {
-      streamMessage(sender, message);
-    } else {
-      setMessages(prevMessages => [...prevMessages, { sender, message }]);
-    }
   };
  
   const streamMessage = (sender, fullMessage) => {
@@ -221,7 +229,6 @@ const Chatbot = () => {
         });
       }
     };
- 
     updateMessage();
   };
  
@@ -230,93 +237,91 @@ const Chatbot = () => {
       const message = userInput.trim();
       setUserInput('');
       appendMessage('user', message);
-
-      // Generate or fetch the conversation ID
-      let conversationId = localStorage.getItem('conversation_id');
-      if (!conversationId) {
-          conversationId = uuidv4(); // Create a new unique ID if it doesn't exist
-          localStorage.setItem('conversation_id', conversationId);
+  
+      // Prepare message histories
+      let completeHistory = JSON.parse(localStorage.getItem('complete_chat_history')) || [];
+      let lastTwoHistory = JSON.parse(localStorage.getItem('last_two_chat_history')) || [];
+  
+      // Initialize lastTwoHistory with two empty conversations if history is empty
+      if (lastTwoHistory.length === 0) {
+        lastTwoHistory = [
+          { user_query: "", bot_response: "" },
+          { user_query: "", bot_response: "" }
+        ];
       }
 
-      // Prepare message history
-      
-      let chatHistory = JSON.parse(localStorage.getItem('chat_history')) || [];
-      console.log(chatHistory)
-      // Skip saving the first user query if it's the first interaction
-      if (chatHistory.length > 0) {
-        chatHistory.push({ user_query: message });
+      if(completeHistory.length === 0){
+        completeHistory.push({user_query: null, bot_response: "Welcome to Meridian Solutions! Before we continue, may I ask for some basic information?"})
       }
-
-      // Keep only the last two conversations in history
-      if (chatHistory.length > 2) {
-          chatHistory.shift();
-      } else if (chatHistory.length === 1) {
-        // Add an empty entry for the first interaction if there's only one message
-        chatHistory.unshift({ user_query: "", bot_response: "" });
+  
+      // Push the current user query to complete history and last two history
+      completeHistory.push({ user_query: message, bot_response: null });
+      lastTwoHistory.push({ user_query: message });
+  
+      // Keep only the last two conversations in lastTwoHistory
+      if (lastTwoHistory.length > 2) {
+        lastTwoHistory = lastTwoHistory.slice(-2);
       }
-      localStorage.setItem('chat_history', JSON.stringify(chatHistory));
- 
-      if(activeService){
+  
+      localStorage.setItem('complete_chat_history', JSON.stringify(completeHistory));
+      localStorage.setItem('last_two_chat_history', JSON.stringify(lastTwoHistory));
+      setSavedHistory(JSON.stringify(completeHistory));
+      if (activeService) {
         setIsLoading(true);
-      try {
-        const response = await fetch('https://chatbotappbackend.azurewebsites.net/query', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            original_query_string: message,  // Current user query
-            conversation_id: conversationId, // Unique conversation ID
-            chat_history: chatHistory        // Entire conversation history
-        }),
-        });
- 
-        if (!response.ok) {
-          console.error('API request failed with status:', response.status);
-          appendMessage('bot', t("Failed to send message. Please try again later."), true);
-          return;
+        try {
+          const response = await fetch('http://127.0.0.1:8000/query', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              original_query_string: message,  // Current user query
+              chat_history: lastTwoHistory     // Last two conversations
+            }),
+          });
+  
+          if (!response.ok) {
+            console.error('API request failed with status:', response.status);
+            appendMessage('bot', t("Failed to send message. Please try again later."), true);
+            return;
+          }
+  
+          const data = await response.json();
+          // console.log("response:", data);
+          const botResponse = data.response?.bot_response || t("I'm sorry, I didn't get this.");
+          streamMessage('bot', botResponse);
+  
+          // Update the last two conversations history with bot's response
+          lastTwoHistory[lastTwoHistory.length - 1].bot_response = botResponse;
+  
+          // Update the complete history with bot's response
+          completeHistory[completeHistory.length - 1].bot_response = botResponse;
+  
+          // Save updated histories to localStorage
+          localStorage.setItem('complete_chat_history', JSON.stringify(completeHistory));
+          localStorage.setItem('last_two_chat_history', JSON.stringify(lastTwoHistory));
+  
+          setUserInput('');
+          setIsLoading(false);
+        } catch (error) {
+          console.error('Error sending message to API:', error);
+          appendMessage('bot', t("An error occurred while sending the message. Please try again later."), true);
+          setIsLoading(false);
         }
-        const data = await response.json();
-        const botResponse = data.response?.bot_response || t("I'm sorry, I didn't get this.");
-        streamMessage('bot', botResponse);
-
-        // Update the chat history with bot's response
-
-        chatHistory[chatHistory.length - 1].bot_response = botResponse;
-        
-        localStorage.setItem('chat_history', JSON.stringify(chatHistory));
-
+      } else {
+        setActiveService(false);
+        handleUserResponse(message);
         setUserInput('');
-        setIsLoading(false);
-        //handleAPIResponse(data);
-      } catch (error) {
-        console.error('Error sending message to API:', error);
-        // appendMessage('bot', t("An error occurred while sending the message. Please try again later."), true);
-        setIsLoading(false);
       }
-    }else{
-      setActiveService(false)
-      handleUserResponse(message);
-      setUserInput('');
-    }
     }
   };
- 
-  const handleAPIResponse = (data) => {
-    console.log('API Response Data:', data); // Log API response data
-    if (data.message) {
-      appendMessage('bot', data.message, true);
-    } else {
-      appendMessage('bot', t("Received an unexpected response."), true);
-    }
-  };
- 
+  
   const handleUserResponse = (response) => {
     const updatedDetails = { ...userDetails };
     if (currentQuestion === 1) updatedDetails.name = response;
-    else if (currentQuestion === 2) updatedDetails.location = response;
-    else if (currentQuestion === 3) updatedDetails.email = response;
-    else if (currentQuestion === 4) updatedDetails.phone = response;
+    else if (currentQuestion === 2) updatedDetails.email = response;
+    else if (currentQuestion === 3) updatedDetails.phone = response;
+    else if (currentQuestion === 4) updatedDetails.company = response;
  
     setUserDetails(updatedDetails);
   };
@@ -334,12 +339,18 @@ const Chatbot = () => {
     }
   };
  
-  const handleFormSubmit = async () => {
+  const handleFormSubmit = () => {
+    // appendMessage('user', JSON.stringify(userDetails));
     setShowForm(false);
     handlePreliminaryQuestions();
-  }
- 
- 
+
+    // Thank the user after filling in the details and activate real-time chat mode
+    appendMessage('bot', t("Thank you for sharing your details. Feel free to ask me anything!"), true);
+    
+    // Enable real-time chat mode
+    setIsRealTimeChat(true);
+    setActiveService(true);
+  };
  
   const handleFAQToggle = (index) => setVisibleFAQIndex(prevIndex => (prevIndex === index ? null : index));
  
@@ -348,9 +359,9 @@ const Chatbot = () => {
   const handleCloseChatbot = () => {
     console.log('Close button clicked'); // Debugging line
 
-    // Clear the conversation data from localStorage
+    // Clear the conversation ID but keep the complete chat history
     localStorage.removeItem('conversation_id');
-    localStorage.removeItem('chat_history');
+    localStorage.removeItem('last_two_chat_history');
     setIsChatbotOpen(false);
   };
  
@@ -362,7 +373,7 @@ const Chatbot = () => {
     <div className={`chatbot-popup ${isChatbotOpen ? 'open' : 'closed'}`}>
       <div className="chat-header">
         <img src={clogo} alt="logo" />
-        <img src={bestwrk} className="new-image" alt="New Image" />
+        <img src={bestwrk} className="new-image" alt="New" />
         <div className='call' onClick={openWebsite}></div>
 
         <button id="close-btn" onClick={handleCloseChatbot}>&times;</button>
@@ -371,7 +382,10 @@ const Chatbot = () => {
         <button className={`tab-link ${activeTab === 'Home' ? 'active' : ''}`} onClick={() => setActiveTab('Home')}>
           {t('Home')}
         </button>
-        <button className={`tab-link ${activeTab === 'Message' ? 'active' : ''}`} onClick={() => setActiveTab('Message')}>
+        <button className={`tab-link ${activeTab === 'Message' ? 'active' : ''}`} onClick={() => {
+          setActiveTab('Message');
+          setTimeout(() => chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 10);
+        }}>
           {t('Message')}
         </button>
         <button className={`tab-link ${activeTab === 'Help' ? 'active' : ''}`} onClick={() => setActiveTab('Help')}>
@@ -416,30 +430,22 @@ const Chatbot = () => {
         ))}
       </div>
       <div id="Message" className={`tab-content messagetab ${activeTab === 'Message' ? 'active' : ''}`}>
-      
         {showForm ? <UserDetailsForm onFormSubmit={handleFormSubmit} /> : null}
         <div className="chat-box">
           {messages.map((msg, index) => (
             <div key={index} className={msg.sender === 'user' ? 'user-message' : 'bot-message'}>
               {msg.message}
             </div>
-            
           ))}
-          {showYesNoButtons && (
-          <div className="yes-no-buttons">
-            <button onClick={handleYesClick}>Yes</button>
-            <button onClick={handleNoClick}>No</button>
-          </div>
-        )}
-          <div ref={chatEndRef} />
+          <div  ref={chatEndRef}/>
       </div>
  
-{isLoading && (
+        {isLoading && (
               <div className="loading-animation">
                 {/* Add your loading animation here */}
                 <div className="loader"></div>
               </div>
-            )}
+        )}
         <div className="chat-input">
           <input
             type="text"
